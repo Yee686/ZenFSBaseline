@@ -29,6 +29,12 @@
 #include "util/coding.h"
 #include "util/crc32c.h"
 
+#ifndef KB
+#define KB 1024
+#define MB (1024 * KB)
+#define GB (1024 * MB)
+#endif
+
 #define DEFAULT_ZENV_LOG_PATH "/tmp/"
 
 namespace ROCKSDB_NAMESPACE {
@@ -251,6 +257,13 @@ ZenFS::ZenFS(ZonedBlockDevice* zbd, std::shared_ptr<FileSystem> aux_fs,
   Info(logger_, "ZenFS initializing");
   next_file_id_ = 1;
   metadata_writer_.zenFS = this;
+
+  GC_count_ = 0;             // GCWorker触发GC次数
+  GC_migrate_size_ = 0;      // GCWorker中触发迁移的字节数
+  GC_migrate_sst_size_ = 0;  // GCWorker实际复制的字节数
+  GC_migrate_extent_ = 0;    // GCWorker迁移extent数目
+
+  
 }
 
 ZenFS::~ZenFS() {
@@ -263,6 +276,25 @@ ZenFS::~ZenFS() {
     run_gc_worker_ = false;
     gc_worker_->join();
   }
+
+  printf("- GC_count = %lu\n", GC_count_);
+  printf("- GC_migrate_size_ = %lu MB\n", GC_migrate_size_ / MB);
+  printf("- GC_migrate_sst_size_ = %lu MB\n", GC_migrate_sst_size_ / MB);
+  printf("- GC_migrate_extent_ = %lu\n", GC_migrate_extent_);
+  printf("- UserBytesWritten = %lu MB\n", zbd_->GetUserBytesWritten() / MB);
+  printf("- TotalBytesWritten = %lu MB\n", zbd_->GetTotalBytesWritten() / MB);
+  printf("- GCBytesWritten = %lu MB\n",
+          (zbd_->GetTotalBytesWritten() - zbd_->GetUserBytesWritten()) / MB);
+  
+  uint64_t reclaimable = zbd_->GetReclaimableSpace(); // 可回收空间
+  uint64_t used = zbd_->GetUsedSpace();               // 使用空间
+  uint64_t free = zbd_->GetFreeSpace();               // 空闲空间
+
+  double reclaimable_radio = 100 * static_cast<double>(reclaimable) / static_cast<double>(used + free + reclaimable);
+  printf("- reclaimable_radio = %lf %%\n", reclaimable_radio);
+
+  double free_radio = 100 * static_cast<double>(free) / static_cast<double>(used + free + reclaimable);
+  printf("- free_radio = %lf %%\n", free_radio);
 
   meta_log_.reset(nullptr);
   ClearFiles();
@@ -280,6 +312,9 @@ void ZenFS::GCWorker() {
     ZenFSSnapshotOptions options;
 
     if (free_percent > GC_START_LEVEL) continue;
+
+    ++GC_count_;  // 触发一次GC操作
+
 
     options.zone_ = 1;
     options.zone_file_ = 1;
@@ -305,6 +340,7 @@ void ZenFS::GCWorker() {
       if (migrate_zones_start.find(ext.zone_start) !=
           migrate_zones_start.end()) {
         migrate_exts.push_back(&ext);
+        GC_migrate_size_ += ext.length;
       }
     }
 
@@ -315,6 +351,7 @@ void ZenFS::GCWorker() {
       s = MigrateExtents(migrate_exts);
       if (!s.ok()) {
         Error(logger_, "Garbage collection failed");
+        GC_migrate_extent_ += (int64_t)migrate_exts.size();
       }
     }
   }
@@ -1847,6 +1884,7 @@ IOStatus ZenFS::MigrateFileExtents(
     ext->zone_->used_capacity_ += ext->length_;
 
     zbd_->ReleaseMigrateZone(target_zone);
+    GC_migrate_sst_size_ += ext->length_;
   }
 
   SyncFileExtents(zfile.get(), new_extent_list);

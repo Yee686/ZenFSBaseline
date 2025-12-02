@@ -458,9 +458,23 @@ class ZenFS : public FileSystemWrapper {
       const std::string& fname,
       const std::vector<ZoneExtentSnapshot*>& migrate_exts);
 
+  uint64_t GC_count_;                   // GCWorker触发GC次数
+  uint64_t GC_migrate_size_;           // GCWorker中触发迁移的字节数
+  uint64_t GC_migrate_sst_size_;       // GCWorker实际复制的字节数
+  uint64_t GC_migrate_extent_;         // GCWorker迁移extent数目
+  
+  std::atomic<uint64_t> bytes_written_{0};
+  std::atomic<uint64_t> gc_bytes_written_{0};
+  void AddBytesWritten(uint64_t written) { bytes_written_ += written; };
+  void AddGCBytesWritten(uint64_t written) { gc_bytes_written_ += written; };
+  uint64_t GetUserBytesWritten() {
+    return bytes_written_.load() - gc_bytes_written_.load();
+  };
+  uint64_t GetTotalBytesWritten() { return bytes_written_.load(); };
+
  private:
   const uint64_t GC_START_LEVEL =
-      20;                      /* Enable GC when < 20% free space available */
+      90;                      /* Enable GC when < 20% free space available */
   const uint64_t GC_SLOPE = 3; /* GC agressiveness */
   void GCWorker();
 };
