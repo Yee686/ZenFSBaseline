@@ -322,7 +322,10 @@ void ZenFS::GCWorker() {
 
     GetZenFSSnapshot(snapshot, options);
 
-    uint64_t threshold = (100 - GC_SLOPE * (GC_START_LEVEL - free_percent));
+    // uint64_t threshold = (100 - GC_SLOPE * (GC_START_LEVEL - free_percent));
+    int64_t threshold_calc = 100 - GC_SLOPE * (GC_START_LEVEL - free_percent);
+    uint64_t threshold = (threshold_calc < 0) ? 0 : static_cast<uint64_t>(threshold_calc);
+    
     std::set<uint64_t> migrate_zones_start;
     for (const auto& zone : snapshot.zones_) {
       if (zone.capacity == 0) {
