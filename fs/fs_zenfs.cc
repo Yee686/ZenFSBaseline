@@ -317,7 +317,7 @@ ZenFS::~ZenFS() {
      uint64_t total_bytes = zbd_->GetTotalBytesWritten();
      if (user_bytes > 0) {
        double write_amplification = 100.0 * total_bytes / user_bytes;
-       printf("- write amplification = %lf\n", write_amplification);
+       printf("- write amplification = %lf %%\n", write_amplification);
      } else {
        printf("- write amplification = N/A (user_bytes = 0)\n");
      }
