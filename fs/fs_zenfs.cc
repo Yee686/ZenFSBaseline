@@ -258,7 +258,7 @@ ZenFS::ZenFS(ZonedBlockDevice* zbd, std::shared_ptr<FileSystem> aux_fs,
   next_file_id_ = 1;
   metadata_writer_.zenFS = this;
 
-  GC_count_ = 0;             // GCWorker触发GC次数
+  GC_active_count_ = 0;             // GCWorker触发GC次数
   GC_migrate_size_ = 0;      // GCWorker中触发迁移的字节数
   GC_migrate_sst_size_ = 0;  // GCWorker实际复制的字节数
   GC_migrate_extent_ = 0;    // GCWorker迁移extent数目
@@ -277,24 +277,50 @@ ZenFS::~ZenFS() {
     gc_worker_->join();
   }
 
-  printf("- GC_count = %lu\n", GC_count_);
+  printf("- GC_active_count = %lu\n", GC_active_count_);
+  printf("- GC_migrate_count = %lu\n", GC_migrate_count_);
   printf("- GC_migrate_size_ = %lu MB\n", GC_migrate_size_ / MB);
   printf("- GC_migrate_sst_size_ = %lu MB\n", GC_migrate_sst_size_ / MB);
   printf("- GC_migrate_extent_ = %lu\n", GC_migrate_extent_);
   printf("- UserBytesWritten = %lu MB\n", zbd_->GetUserBytesWritten() / MB);
   printf("- TotalBytesWritten = %lu MB\n", zbd_->GetTotalBytesWritten() / MB);
   printf("- GCBytesWritten = %lu MB\n",
-          (zbd_->GetTotalBytesWritten() - zbd_->GetUserBytesWritten()) / MB);
-  
-  uint64_t reclaimable = zbd_->GetReclaimableSpace(); // 可回收空间
-  uint64_t used = zbd_->GetUsedSpace();               // 使用空间
-  uint64_t free = zbd_->GetFreeSpace();               // 空闲空间
+         (zbd_->GetTotalBytesWritten() - zbd_->GetUserBytesWritten()) / MB);
 
-  double reclaimable_radio = 100 * static_cast<double>(reclaimable) / static_cast<double>(used + free + reclaimable);
-  printf("- reclaimable_radio = %lf %%\n", reclaimable_radio);
-
-  double free_radio = 100 * static_cast<double>(free) / static_cast<double>(used + free + reclaimable);
-  printf("- free_radio = %lf %%\n", free_radio);
+         uint64_t reclaimable =
+         zbd_->GetAllReclaimableSpace();    // 可回收空间（所有zone的垃圾数据）
+     uint64_t used = zbd_->GetUsedSpace();  // 使用空间（有效数据）
+     uint64_t free = zbd_->GetFreeSpace();  // 空闲空间（剩余可写空间）
+     uint64_t total_space = zbd_->GetTotalSpace();  // 总空间
+ 
+     // 可回收率：可回收空间占总空间的比例
+     double reclaimable_radio = 100.0 * reclaimable / total_space;
+     printf("- reclaimable_radio = %lf %%\n", reclaimable_radio);
+ 
+     // 空闲率：空闲空间占总空间的比例
+     double free_radio = 100.0 * free / total_space;
+     printf("- free_radio = %lf %%\n", free_radio);
+ 
+     // 使用率：使用空间占总空间的比例
+     double used_radio = 100.0 * used / total_space;
+     printf("- used_radio = %lf %%\n", used_radio);
+ 
+     if (used > 0) {
+       double space_amplification = 100.0 * (used + reclaimable) / used;
+       printf("- space amplification = %lf %%\n", space_amplification);
+     } else {
+       printf("- space amplification = N/A (used = 0)\n");
+     }
+ 
+     // 写放大率：总写入量 / 用户写入量
+     uint64_t user_bytes = zbd_->GetUserBytesWritten();
+     uint64_t total_bytes = zbd_->GetTotalBytesWritten();
+     if (user_bytes > 0) {
+       double write_amplification = 100.0 * total_bytes / user_bytes;
+       printf("- write amplification = %lf\n", write_amplification);
+     } else {
+       printf("- write amplification = N/A (user_bytes = 0)\n");
+     }
 
   meta_log_.reset(nullptr);
   ClearFiles();
@@ -313,7 +339,7 @@ void ZenFS::GCWorker() {
 
     if (free_percent > GC_START_LEVEL) continue;
 
-    ++GC_count_;  // 触发一次GC操作
+    ++GC_active_count_;  // 触发一次GC操作
 
 
     options.zone_ = 1;

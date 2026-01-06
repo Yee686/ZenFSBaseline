@@ -295,6 +295,28 @@ uint64_t ZonedBlockDevice::GetReclaimableSpace() {
   return reclaimable;
 }
 
+// 获取所有可回收空间
+uint64_t ZonedBlockDevice::GetAllReclaimableSpace() {
+  uint64_t all_reclaimable = 0;
+  for (const auto z : io_zones) {
+    // 写过的总量 = 总容量 - 还没写的容量
+    uint64_t written_len = z->max_capacity_ - z->capacity_;
+    // 垃圾 = 写过的总量 - 里面还活着的有效数据
+    if (written_len > z->used_capacity_) {
+      all_reclaimable += (written_len - z->used_capacity_);
+    }
+  }
+  return all_reclaimable;
+}
+
+// 获取总空间
+uint64_t ZonedBlockDevice::GetTotalSpace() {
+  uint64_t total_space = 0;
+  for (const auto z : io_zones) {
+    total_space += z->max_capacity_;
+  }
+  return total_space;
+}
 void ZonedBlockDevice::LogZoneStats() {
   uint64_t used_capacity = 0;
   uint64_t reclaimable_capacity = 0;

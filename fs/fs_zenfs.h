@@ -458,7 +458,8 @@ class ZenFS : public FileSystemWrapper {
       const std::string& fname,
       const std::vector<ZoneExtentSnapshot*>& migrate_exts);
 
-  uint64_t GC_count_;                   // GCWorker触发GC次数
+  uint64_t GC_active_count_;                   // GCWorker唤醒次数
+  uint64_t GC_migrate_count_;                   // GCWorker迁移次数
   uint64_t GC_migrate_size_;           // GCWorker中触发迁移的字节数
   uint64_t GC_migrate_sst_size_;       // GCWorker实际复制的字节数
   uint64_t GC_migrate_extent_;         // GCWorker迁移extent数目

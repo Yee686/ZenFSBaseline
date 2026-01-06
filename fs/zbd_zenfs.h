@@ -189,6 +189,8 @@ class ZonedBlockDevice {
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
   uint64_t GetReclaimableSpace();
+  uint64_t GetAllReclaimableSpace();
+  uint64_t GetTotalSpace();
 
   std::string GetFilename();
   uint32_t GetBlockSize();
@@ -223,12 +225,12 @@ class ZonedBlockDevice {
   IOStatus TakeMigrateZone(Zone **out_zone, Env::WriteLifeTimeHint lifetime,
                            uint32_t min_capacity);
 
-  void AddBytesWritten(uint64_t written) { bytes_written_ += written; };
-  void AddGCBytesWritten(uint64_t written) { gc_bytes_written_ += written; };
+  void AddBytesWritten(uint64_t written) { bytes_written_.fetch_add(written, std::memory_order_relaxed); };
+  void AddGCBytesWritten(uint64_t written) { gc_bytes_written_.fetch_add(written, std::memory_order_relaxed); };
   uint64_t GetUserBytesWritten() {
-    return bytes_written_.load() - gc_bytes_written_.load();
+    return bytes_written_.load(std::memory_order_relaxed) - gc_bytes_written_.load(std::memory_order_relaxed);
   };
-  uint64_t GetTotalBytesWritten() { return bytes_written_.load(); };
+  uint64_t GetTotalBytesWritten() { return bytes_written_.load(std::memory_order_relaxed); };
 
  private:
   IOStatus GetZoneDeferredStatus();
